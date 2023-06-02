@@ -314,7 +314,7 @@ const Chart = withTooltip<
           <AxisLeft
             scale={yScale}
             left={margin.left}
-            tickFormat={(v) => formatCurrency(v.toString())}
+            tickFormat={(v) => formatCurrency(v.valueOf())}
           />
           <Bar
             x={margin.left}
@@ -400,7 +400,7 @@ type HomeProps = {
   data: ApiResponse;
 };
 
-const formatCurrency = (value: string) => {
+const formatCurrency = (value: number) => {
   // Format the currency value to abbreviated format in USD
   const formatter = new Intl.NumberFormat("en-US", {
     style: "currency",
