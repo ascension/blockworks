@@ -304,7 +304,7 @@ const Chart = withTooltip<
       ),
       range: thresholdColors,
     });
-
+    const timeframes: Array<Timeframes> = ["ALL", "YTD", "12M", "3M", "1M"];
     return (
       <div>
         <div className="flex justify-center items-center text-sm py-2">
@@ -469,36 +469,19 @@ const Chart = withTooltip<
           </div>
         )}
         <div className="w-full">
-          <button
-            className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 mx-1 rounded text-sm"
-            onClick={() => dispatch({ type: "ALL", data })}
-          >
-            All
-          </button>
-          <button
-            className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 mx-1 rounded text-sm"
-            onClick={() => dispatch({ type: "YTD", data })}
-          >
-            YTD
-          </button>
-          <button
-            className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 mx-1 rounded text-sm"
-            onClick={() => dispatch({ type: "12M", data })}
-          >
-            12M
-          </button>
-          <button
-            className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 mx-1 rounded text-sm"
-            onClick={() => dispatch({ type: "3M", data })}
-          >
-            3M
-          </button>
-          <button
-            className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 mx-1 rounded text-sm"
-            onClick={() => dispatch({ type: "1M", data })}
-          >
-            1M
-          </button>
+          {timeframes.map((timeframe) => (
+            <button
+              key={timeframe}
+              className={`${
+                filteredData.timeframe === timeframe
+                  ? "bg-purple-500"
+                  : "bg-gray-500"
+              } hover:bg-purple-700 text-white font-bold py-2 px-4 mx-1 rounded text-sm`}
+              onClick={() => dispatch({ type: timeframe, data })}
+            >
+              {timeframe}
+            </button>
+          ))}
         </div>
       </div>
     );
