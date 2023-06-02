@@ -4,11 +4,7 @@ import { GetStaticProps } from "next";
 
 import ParentSize from "@visx/responsive/lib/components/ParentSize";
 
-import fs from "node:fs";
-import csv from "csv-parser";
-import { flatMap, head, omit } from "lodash";
-
-import React, { useMemo, useCallback } from "react";
+import React, { useMemo, useCallback, useReducer, Reducer } from "react";
 import { AreaClosed, Line, Bar } from "@visx/shape";
 import { AxisBottom, AxisLeft } from "@visx/axis";
 import { curveMonotoneX } from "@visx/curve";
@@ -23,11 +19,13 @@ import {
 import { WithTooltipProvidedProps } from "@visx/tooltip/lib/enhancers/withTooltip";
 import { localPoint } from "@visx/event";
 import { LinearGradient } from "@visx/gradient";
-import { bisector, extent } from "d3-array";
+import { bisector } from "d3-array";
 import { LegendOrdinal, LegendItem, LegendLabel } from "@visx/legend";
 import { timeFormat } from "d3-time-format";
-import useSWR from "swr";
+// import useSWR from "swr";
 import { loadData } from "../lib/loadData";
+import { CoinMetricData, Thresholds } from "../lib/types";
+import { metadata } from "../lib/metadata";
 
 export const background = "#fff";
 export const background2 = "#fff";
@@ -43,25 +41,17 @@ const tooltipStyles = {
 // util
 const formatDate = timeFormat("%b %d, '%y");
 
-type CoinMarketAddressCounts = {
-  time: string;
-  price: string;
-  "1k": string;
-  "10k": string;
-  "100k": string;
-  "1M": string;
-  "10M": string;
-};
-
 type TimeSeries = { time: string; value: number };
-type Thresholds = "1k" | "10k" | "100k" | "1M" | "10M";
 
 type ApiResponse = {
-  data: Array<CoinMarketAddressCounts>;
+  data: Array<CoinMetricData>;
   metadata: {
     thresholds: Array<Thresholds>;
-    xScale: { min: number; max: number };
-    yScale: { min: number; max: number };
+    xScale: {
+      min: string | number | undefined;
+      max: string | number | undefined;
+    };
+    yScale: { min: number | undefined; max: number | undefined };
   };
   meta: Record<
     "1k" | "10k" | "100k" | "1M" | "10M",
@@ -70,16 +60,14 @@ type ApiResponse = {
 };
 
 // accessors
-const getDate = (d?: CoinMarketAddressCounts) => new Date(d?.time ?? "");
+const getDate = (d?: CoinMetricData) => new Date(d?.time ?? "");
 const getAddressThresholdCount = (
-  d?: CoinMarketAddressCounts,
+  d?: CoinMetricData,
   threshold: Thresholds = "1k"
 ) => {
   return d ? parseInt(d[threshold]) : 0;
 };
-const bisectDate = bisector<CoinMarketAddressCounts, Date>(
-  (d) => new Date(d.time)
-).left;
+const bisectDate = bisector<CoinMetricData, Date>((d) => new Date(d.time)).left;
 
 export type AreaProps = {
   width: number;
@@ -87,13 +75,14 @@ export type AreaProps = {
   margin?: { top: number; right: number; bottom: number; left: number };
 };
 
-const fetcher = async (url: string) => {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error("An error occurred while fetching the data.");
-  }
-  return response.json();
-};
+// Disabled due to data being loaded in getStaticProps
+// const fetcher = async (url: string) => {
+//   const response = await fetch(url);
+//   if (!response.ok) {
+//     throw new Error("An error occurred while fetching the data.");
+//   }
+//   return response.json();
+// };
 
 const thresholdColorMap: Record<Thresholds, string> = {
   "1k": "blue",
@@ -104,9 +93,83 @@ const thresholdColorMap: Record<Thresholds, string> = {
 };
 const thresholdColors = Object.values(thresholdColorMap);
 
+type Timeframes = "ALL" | "YTD" | "12M" | "3M" | "1M";
+
+type State = ApiResponse & { timeframe: Timeframes };
+type Action = { type: Timeframes; data: ApiResponse };
+function reducer(state: State, action: Action): State {
+  const now = new Date();
+
+  switch (action.type) {
+    case "ALL":
+      return {
+        ...state,
+        timeframe: action.type,
+        ...action.data,
+        data: action.data.data,
+      };
+    case "12M": {
+      const date = new Date();
+      date.setMonth(date.getMonth() - 12);
+      const filteredData = action.data.data.filter(
+        (d) => new Date(d.time) >= date
+      );
+      return {
+        ...state,
+        timeframe: action.type,
+        ...action.data,
+        data: filteredData,
+        metadata: metadata(filteredData),
+      };
+    }
+    case "3M": {
+      const date = new Date();
+      date.setMonth(date.getMonth() - 3);
+      const filteredData = action.data.data.filter(
+        (d) => new Date(d.time) >= date
+      );
+      return {
+        ...state,
+        timeframe: action.type,
+        ...action.data,
+        data: filteredData,
+        metadata: metadata(filteredData),
+      };
+    }
+    case "1M": {
+      const date = new Date();
+      date.setMonth(date.getMonth() - 1);
+      const filteredData = action.data.data.filter(
+        (d) => new Date(d.time) >= date
+      );
+      return {
+        ...state,
+        timeframe: action.type,
+        ...action.data,
+        data: filteredData,
+        metadata: metadata(filteredData),
+      };
+    }
+    case "YTD": {
+      const filteredData = action.data.data.filter(
+        (d) => new Date(d.time) >= new Date(now.getFullYear(), 0, 1)
+      );
+      return {
+        ...state,
+        timeframe: action.type,
+        ...action.data,
+        data: filteredData,
+        metadata: metadata(filteredData),
+      };
+    }
+    default:
+      return { timeframe: "ALL", ...action.data, data: action.data.data };
+  }
+}
+
 const Chart = withTooltip<
   AreaProps & { data: ApiResponse },
-  { data?: CoinMarketAddressCounts; closestThreshold: Thresholds }
+  { data?: CoinMetricData; closestThreshold: Thresholds }
 >(
   ({
     data,
@@ -119,7 +182,7 @@ const Chart = withTooltip<
     tooltipTop = 0,
     tooltipLeft = 0,
   }: AreaProps & { data: ApiResponse } & WithTooltipProvidedProps<{
-      data?: CoinMarketAddressCounts;
+      data?: CoinMetricData;
       closestThreshold: Thresholds;
     }>) => {
     if (width < 10) return null;
@@ -128,31 +191,43 @@ const Chart = withTooltip<
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
 
+    // Disabled due to data being loaded in getStaticProps
     // const { data, error, isLoading } = useSWR<ApiResponse>(
     //   "/api/btc-addresses",
     //   fetcher
     // );
+    const [filteredData, dispatch] = useReducer<Reducer<State, Action>>(
+      reducer,
+      {
+        ...data,
+        data: data.data,
+        timeframe: "ALL",
+      }
+    );
+
+    console.log({ filteredData });
+
     // scales
     const dateScale = useMemo(
       () =>
         scaleTime({
           range: [margin.left, innerWidth + margin.left],
           domain: [
-            new Date(data?.metadata.xScale.min ?? ""),
-            new Date(data?.metadata.xScale.max ?? ""),
+            new Date(filteredData?.metadata.xScale.min ?? ""),
+            new Date(filteredData?.metadata.xScale.max ?? ""),
           ],
         }),
-      [innerWidth, margin.left, data]
+      [innerWidth, margin.left, filteredData]
     );
 
     const yScale = useMemo(
       () =>
         scaleLinear({
           range: [innerHeight + margin.top, margin.top],
-          domain: [0, data?.metadata.yScale.max ?? 0],
+          domain: [0, filteredData?.metadata.yScale.max ?? 0],
           nice: true,
         }),
-      [margin.top, innerHeight, data]
+      [margin.top, innerHeight, filteredData]
     );
 
     // tooltip handler
@@ -165,9 +240,9 @@ const Chart = withTooltip<
         const { x, y } = localPoint(event) || { x: 0 };
 
         const x0 = dateScale.invert(x);
-        const index = bisectDate(data?.data ?? [], x0, 1);
-        const d0 = data?.data[index - 1];
-        const d1 = data?.data[index];
+        const index = bisectDate(filteredData?.data ?? [], x0, 1);
+        const d0 = filteredData?.data[index - 1];
+        const d1 = filteredData?.data[index];
         let d = d0;
         if (d1 && getDate(d1)) {
           d =
@@ -178,7 +253,7 @@ const Chart = withTooltip<
         }
 
         const xVals =
-          data?.metadata.thresholds.map((key) =>
+          filteredData?.metadata.thresholds.map((key) =>
             yScale(getAddressThresholdCount(d, key))
           ) ?? [];
 
@@ -210,7 +285,7 @@ const Chart = withTooltip<
 
         const neighbor = findClosestNeighbor(xVals, y, 100);
         const closestThreshold =
-          data?.metadata.thresholds[
+          filteredData?.metadata.thresholds[
             xVals.findIndex((element) => element === neighbor)
           ];
 
@@ -220,11 +295,13 @@ const Chart = withTooltip<
           tooltipTop: yScale(getAddressThresholdCount(d, closestThreshold)),
         });
       },
-      [showTooltip, yScale, dateScale, data]
+      [showTooltip, yScale, dateScale, filteredData]
     );
     const legendGlyphSize = 15;
     const ordinalColorScale = scaleOrdinal({
-      domain: data.metadata.thresholds.map((threshold) => `>$${threshold}`),
+      domain: filteredData.metadata.thresholds.map(
+        (threshold) => `>$${threshold}`
+      ),
       range: thresholdColors,
     });
 
@@ -294,12 +371,12 @@ const Chart = withTooltip<
             strokeOpacity={0}
             pointerEvents="none"
           />
-          {data &&
-            data.data &&
-            data.metadata.thresholds.map((key, index) => (
-              <AreaClosed<CoinMarketAddressCounts>
+          {filteredData &&
+            filteredData.data &&
+            filteredData.metadata.thresholds.map((key, index) => (
+              <AreaClosed<CoinMetricData>
                 key={key}
-                data={data?.data ?? []}
+                data={filteredData?.data ?? []}
                 x={(d) => dateScale(getDate(d)) ?? 0}
                 y={(d) => yScale(getAddressThresholdCount(d, key))}
                 y0={(d) => yScale(getAddressThresholdCount(d, key))}
@@ -391,6 +468,38 @@ const Chart = withTooltip<
             </Tooltip>
           </div>
         )}
+        <div className="w-full">
+          <button
+            className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 mx-1 rounded text-sm"
+            onClick={() => dispatch({ type: "ALL", data })}
+          >
+            All
+          </button>
+          <button
+            className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 mx-1 rounded text-sm"
+            onClick={() => dispatch({ type: "YTD", data })}
+          >
+            YTD
+          </button>
+          <button
+            className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 mx-1 rounded text-sm"
+            onClick={() => dispatch({ type: "12M", data })}
+          >
+            12M
+          </button>
+          <button
+            className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 mx-1 rounded text-sm"
+            onClick={() => dispatch({ type: "3M", data })}
+          >
+            3M
+          </button>
+          <button
+            className="bg-purple-500 hover:bg-purple-700 text-white font-bold py-2 px-4 mx-1 rounded text-sm"
+            onClick={() => dispatch({ type: "1M", data })}
+          >
+            1M
+          </button>
+        </div>
       </div>
     );
   }
