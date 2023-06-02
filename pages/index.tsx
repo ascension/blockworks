@@ -205,8 +205,6 @@ const Chart = withTooltip<
       }
     );
 
-    console.log({ filteredData });
-
     // scales
     const dateScale = useMemo(
       () =>
